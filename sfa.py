@@ -450,7 +450,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
 
         if i == 0 and has_mgs and not mgs_created:
             mgs_vd = VirtualDisk(
-                name=f"{fs_name}_mgs",
+                name="mgs",
                 raid_level="RAID 6",
                 drive_count=2,
                 drive_size_gb=64,
@@ -580,7 +580,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
 
         if mgs_for_this_pool and not mgs_created:
             mgs_vd = VirtualDisk(
-                name=f"{fs_name}_mgs",
+                name="mgs",
                 raid_level="RAID 6",
                 drive_count=2,
                 drive_size_gb=64,
