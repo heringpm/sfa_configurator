@@ -397,7 +397,7 @@ def step_ask_mgs() -> bool:
     return mgs_needed
 
 
-def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool = False) -> list[Pool]:
+def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str, has_mgs: bool = False) -> list[Pool]:
     """Configure NVMe pools with automatic metadata/data sizing."""
     section("Step 5a — Configure NVMe Pools")
 
@@ -431,6 +431,8 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
 
     pools = []
     mgs_created = False
+    mdt_index = 0
+    ost_index = 0
 
     for i in range(num_pools):
         pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe")
@@ -448,10 +450,10 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
 
         if i == 0 and has_mgs and not mgs_created:
             mgs_vd = VirtualDisk(
-                name="mgs",
+                name=f"{fs_name}_mgs",
                 raid_level="RAID 6",
                 drive_count=2,
-                drive_size_gb=128,
+                drive_size_gb=64,
                 chunk_size_kb=128,
                 purpose="Metadata",
                 hot_spare=False
@@ -488,7 +490,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
 
             for j in range(num_metadata_vds):
                 vd = VirtualDisk(
-                    name=f"nvme_pool_{i+1}_metadata_vd{j+1}",
+                    name=f"{fs_name}_mdt{mdt_index:04d}_s0",
                     raid_level="RAID 6",
                     drive_count=drives_per_vd,
                     drive_size_gb=metadata_drive_size_gb,
@@ -497,6 +499,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
                     hot_spare=False
                 )
                 pool.virtual_disks.append(vd)
+                mdt_index += 1
 
         if num_data_vds > 0:
             data_per_vd_gb = layout['total_data_capacity_gb'] // num_data_vds
@@ -504,7 +507,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
 
             for j in range(num_data_vds):
                 vd = VirtualDisk(
-                    name=f"nvme_pool_{i+1}_data_vd{j+1}",
+                    name=f"{fs_name}_ost{ost_index:04d}",
                     raid_level="RAID 6",
                     drive_count=drives_per_vd,
                     drive_size_gb=data_drive_size_gb,
@@ -513,13 +516,14 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
                     hot_spare=False
                 )
                 pool.virtual_disks.append(vd)
+                ost_index += 1
 
         pools.append(pool)
 
     return pools
 
 
-def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool = False) -> list[Pool]:
+def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, has_mgs: bool = False) -> list[Pool]:
     """Configure HDD pools (flexible configuration with sizing suggestions)."""
     section("Step 5b — Configure HDD Pools")
 
@@ -537,6 +541,8 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
     needs_metadata = usage != "Data Only"
     mgs_size_gb = 128 if has_mgs else 0
     mgs_created = False
+    mdt_index = 0
+    ost_index = 0
 
     while True:
         pool_index += 1
@@ -574,7 +580,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
 
         if mgs_for_this_pool and not mgs_created:
             mgs_vd = VirtualDisk(
-                name="mgs",
+                name=f"{fs_name}_mgs",
                 raid_level="RAID 6",
                 drive_count=2,
                 drive_size_gb=64,
@@ -584,9 +590,6 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
             )
             pool.virtual_disks.append(mgs_vd)
             mgs_created = True
-
-        metadata_vd_count = 0
-        data_vd_count = 0
 
         for vd_idx in range(int(num_vds) - (1 if mgs_for_this_pool and mgs_created else 0)):
             vd_drives = inquirer.text(
@@ -612,14 +615,16 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
             if purpose == "Metadata":
                 metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, layout['metadata_vds'])
                 drive_size = metadata_per_vd_gb // vd_drives
-                metadata_vd_count += 1
+                vd_name = f"{fs_name}_mdt{mdt_index:04d}_s0"
+                mdt_index += 1
             else:
                 data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, layout['data_vds'])
                 drive_size = data_per_vd_gb // vd_drives
-                data_vd_count += 1
+                vd_name = f"{fs_name}_ost{ost_index:04d}"
+                ost_index += 1
 
             vd = VirtualDisk(
-                name=f"{pool_name}_vd{vd_idx+1}",
+                name=vd_name,
                 raid_level=raid_level,
                 drive_count=vd_drives,
                 drive_size_gb=drive_size,
@@ -677,10 +682,10 @@ def run_wizard(defaults=None) -> StorageConfig:
     )
 
     if not keep_existing and drives:
-        nvme_pools = step_configure_nvme_pools(drives, usage, has_mgs)
+        nvme_pools = step_configure_nvme_pools(drives, usage, fs_name, has_mgs)
         config.pools.extend(nvme_pools)
 
-        hdd_pools = step_configure_hdd_pools(drives, usage, has_mgs)
+        hdd_pools = step_configure_hdd_pools(drives, usage, fs_name, has_mgs)
         config.pools.extend(hdd_pools)
 
         if not nvme_pools and not hdd_pools:
