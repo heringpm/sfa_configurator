@@ -149,7 +149,15 @@ def parse_drive_table(table_output: str) -> list[DriveInfo]:
     lines = table_output.strip().split('\n')
 
     for line in lines:
-        if '|' not in line or '10.36' not in line:
+        if '|' not in line:
+            continue
+
+        # Skip header and separator lines
+        if any(x in line for x in ['Source IPs', '========', '--------', 'Idx', 'Pos']):
+            continue
+
+        # Look for data lines (should have IP addresses)
+        if not any(char.isdigit() for char in line.split('|')[0]):
             continue
 
         parts = [p.strip() for p in line.split('|')]
@@ -162,6 +170,9 @@ def parse_drive_table(table_output: str) -> list[DriveInfo]:
             if 'GiB' in capacity_str:
                 capacity_val /= 1024
 
+            pool_str = parts[12]
+            pool = -1 if pool_str == "--" else int(pool_str)
+
             drive = DriveInfo(
                 slot=int(parts[3]),
                 vendor=parts[4],
@@ -169,7 +180,7 @@ def parse_drive_table(table_output: str) -> list[DriveInfo]:
                 drive_type=parts[6],
                 capacity_tib=capacity_val,
                 serial=parts[11],
-                pool=int(parts[12]),
+                pool=pool,
                 health=parts[13],
                 state=parts[15]
             )
@@ -352,8 +363,13 @@ def step_detect_drives(appliance_name: str) -> list[DriveInfo]:
     drives = parse_drive_table(output)
 
     if not drives:
-        print("Warning: No drives found in EMF output.")
-        print(f"{DIM}Debug: Raw output (first 500 chars):\n{output[:500]}{RESET}\n")
+        has_headers = "Source IPs" in output and "Capacity" in output
+        if has_headers:
+            print("Warning: No drive data found (appliance may have no physical drives).")
+            print(f"{DIM}Debug: Headers present but no data rows in output{RESET}\n")
+        else:
+            print("Warning: Could not parse drive information from EMF output.")
+            print(f"{DIM}Debug: Raw output (first 500 chars):\n{output[:500]}{RESET}\n")
         return []
 
     groups = group_drives_by_type(drives)
