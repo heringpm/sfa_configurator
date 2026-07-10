@@ -482,29 +482,37 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
             num_data_vds = layout['data_vds']
             num_metadata_vds = layout['metadata_vds']
 
-        for j in range(num_metadata_vds):
-            vd = VirtualDisk(
-                name=f"nvme_pool_{i+1}_metadata_vd{j+1}",
-                raid_level="RAID 6",
-                drive_count=drives_per_vd,
-                drive_size_gb=capacity_gb,
-                chunk_size_kb=128,
-                purpose="Metadata",
-                hot_spare=False
-            )
-            pool.virtual_disks.append(vd)
+        if num_metadata_vds > 0:
+            metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // 2 // num_metadata_vds
+            metadata_drive_size_gb = metadata_per_vd_gb // drives_per_vd
 
-        for j in range(num_data_vds):
-            vd = VirtualDisk(
-                name=f"nvme_pool_{i+1}_data_vd{j+1}",
-                raid_level="RAID 6",
-                drive_count=drives_per_vd,
-                drive_size_gb=capacity_gb,
-                chunk_size_kb=128,
-                purpose="Data",
-                hot_spare=False
-            )
-            pool.virtual_disks.append(vd)
+            for j in range(num_metadata_vds):
+                vd = VirtualDisk(
+                    name=f"nvme_pool_{i+1}_metadata_vd{j+1}",
+                    raid_level="RAID 6",
+                    drive_count=drives_per_vd,
+                    drive_size_gb=metadata_drive_size_gb,
+                    chunk_size_kb=128,
+                    purpose="Metadata",
+                    hot_spare=False
+                )
+                pool.virtual_disks.append(vd)
+
+        if num_data_vds > 0:
+            data_per_vd_gb = layout['total_data_capacity_gb'] // 2 // num_data_vds
+            data_drive_size_gb = data_per_vd_gb // drives_per_vd
+
+            for j in range(num_data_vds):
+                vd = VirtualDisk(
+                    name=f"nvme_pool_{i+1}_data_vd{j+1}",
+                    raid_level="RAID 6",
+                    drive_count=drives_per_vd,
+                    drive_size_gb=data_drive_size_gb,
+                    chunk_size_kb=128,
+                    purpose="Data",
+                    hot_spare=False
+                )
+                pool.virtual_disks.append(vd)
 
         pools.append(pool)
 
@@ -569,7 +577,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
                 name="mgs",
                 raid_level="RAID 6",
                 drive_count=2,
-                drive_size_gb=128,
+                drive_size_gb=64,
                 chunk_size_kb=128,
                 purpose="Metadata",
                 hot_spare=False
@@ -577,16 +585,13 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
             pool.virtual_disks.append(mgs_vd)
             mgs_created = True
 
+        metadata_vd_count = 0
+        data_vd_count = 0
+
         for vd_idx in range(int(num_vds) - (1 if mgs_for_this_pool and mgs_created else 0)):
             vd_drives = inquirer.text(
                 message=f"  VD {vd_idx+1}: drives per VD:",
                 default="12",
-                validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
-            ).execute()
-
-            vd_size = inquirer.text(
-                message=f"  VD {vd_idx+1}: drive size (GB):",
-                default=str(capacity_gb),
                 validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
             ).execute()
 
@@ -602,11 +607,22 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
                 default="Data",
             ).execute()
 
+            vd_drives = int(vd_drives)
+
+            if purpose == "Metadata":
+                metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // 2 // max(1, layout['metadata_vds'])
+                drive_size = metadata_per_vd_gb // vd_drives
+                metadata_vd_count += 1
+            else:
+                data_per_vd_gb = layout['total_data_capacity_gb'] // 2 // max(1, layout['data_vds'])
+                drive_size = data_per_vd_gb // vd_drives
+                data_vd_count += 1
+
             vd = VirtualDisk(
                 name=f"{pool_name}_vd{vd_idx+1}",
                 raid_level=raid_level,
-                drive_count=int(vd_drives),
-                drive_size_gb=int(vd_size),
+                drive_count=vd_drives,
+                drive_size_gb=drive_size,
                 chunk_size_kb=128,
                 purpose=purpose,
                 hot_spare=False
