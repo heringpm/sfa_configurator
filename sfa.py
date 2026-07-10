@@ -496,13 +496,19 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
             validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
         ).execute())
 
+    nvme_minimum_rebuilds = int(inquirer.text(
+        message="Minimum rebuilds for NVMe pools:",
+        default="0",
+        validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+    ).execute())
+
     pools = []
     mdt_index = 0
     ost_index = 0
     mgs_created = False
 
     for i in range(num_pools):
-        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", drive_count=drives_per_pool, minimum_rebuilds=0)
+        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", drive_count=drives_per_pool, minimum_rebuilds=nvme_minimum_rebuilds)
 
         if i == 0 and has_mgs and not mgs_created and num_metadata_vds > 0:
             mgs_vd = VirtualDisk(
@@ -566,38 +572,6 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
     total_hdd_drives = len(hdd_drives)
     print(f"Found {total_hdd_drives} HDD drive(s) at {format_capacity(hdd_capacity_gb)} each.\n")
 
-    print(f"{HEADER}Virtual Disk Settings:{RESET}")
-    print(f"  Default: Chunk 256KB, RAID 6, 10 drives per VD, 1 VD per pool")
-    print()
-
-    use_standard_hdd_vd = inquirer.confirm(
-        message="Use standard HDD VD settings?",
-        default=True,
-    ).execute()
-
-    if use_standard_hdd_vd:
-        hdd_chunk_size_kb = 256
-        hdd_raid_level = "RAID 6"
-        hdd_drives_per_vd = 10
-    else:
-        hdd_chunk_size_kb = int(inquirer.select(
-            message="Chunk size (KB):",
-            choices=CHUNK_SIZES,
-            default="256",
-        ).execute())
-
-        hdd_raid_level = inquirer.select(
-            message="RAID level:",
-            choices=RAID_LEVELS,
-            default="RAID 6",
-        ).execute()
-
-        hdd_drives_per_vd = int(inquirer.text(
-            message="Drives per VD:",
-            default="10",
-            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
-        ).execute())
-
     hdd_pools = []
     hdd_pool_index = 0
     hdd_mdt_index = 0
@@ -606,26 +580,67 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
 
     while True:
         hdd_pool_index += 1
+
+        print(f"\n{HEADER}HDD Pool {hdd_pool_index}:{RESET}")
+
         hdd_pool_name = inquirer.text(
-            message=f"HDD Pool {hdd_pool_index} name:",
+            message="Pool name:",
             default=f"hdd_pool_{hdd_pool_index}",
         ).execute()
 
         disk_type = inquirer.select(
-            message=f"Disk type for {hdd_pool_name}:",
+            message="Disk type:",
             choices=["HDD", "SSD", "NVMe"],
             default="HDD",
         ).execute()
 
+        hdd_num_drives_in_pool = int(inquirer.text(
+            message="Number of drives in pool:",
+            default="12",
+            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+        ).execute())
+
         pool_purpose = inquirer.select(
-            message=f"Pool purpose for {hdd_pool_name}:",
+            message="Pool purpose:",
             choices=["Metadata + Data", "Metadata Only", "Data Only"],
             default="Metadata + Data",
         ).execute()
 
-        hdd_num_drives_in_pool = int(inquirer.text(
-            message=f"Number of drives in {hdd_pool_name}:",
-            default="12",
+        print(f"\n{HEADER}Virtual Disk Settings:{RESET}")
+        print(f"  Default: Chunk 256KB, RAID 6, 10 drives per VD, 1 VD per pool")
+        print()
+
+        use_standard_hdd_vd = inquirer.confirm(
+            message="Use standard HDD VD settings for this pool?",
+            default=True,
+        ).execute()
+
+        if use_standard_hdd_vd:
+            hdd_chunk_size_kb = 256
+            hdd_raid_level = "RAID 6"
+            hdd_drives_per_vd = 10
+        else:
+            hdd_chunk_size_kb = int(inquirer.select(
+                message="Chunk size (KB):",
+                choices=CHUNK_SIZES,
+                default="256",
+            ).execute())
+
+            hdd_raid_level = inquirer.select(
+                message="RAID level:",
+                choices=RAID_LEVELS,
+                default="RAID 6",
+            ).execute()
+
+            hdd_drives_per_vd = int(inquirer.text(
+                message="Drives per VD:",
+                default="10",
+                validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+            ).execute())
+
+        hdd_minimum_rebuilds = int(inquirer.text(
+            message="Minimum rebuilds for this pool:",
+            default="1",
             validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
         ).execute())
 
@@ -633,7 +648,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
         hdd_mgs_for_this_pool = hdd_mgs_size_gb if has_metadata_in_pool and not mgs_created else 0
         hdd_layout = calculate_vd_layout(hdd_num_drives_in_pool, hdd_capacity_gb, drives_per_vd=hdd_drives_per_vd, needs_metadata=has_metadata_in_pool, mgs_size_gb=hdd_mgs_for_this_pool)
 
-        hdd_pool = Pool(name=hdd_pool_name.strip(), tier="HDD", disk_type=disk_type, drive_count=hdd_num_drives_in_pool, minimum_rebuilds=1)
+        hdd_pool = Pool(name=hdd_pool_name.strip(), tier="HDD", disk_type=disk_type, drive_count=hdd_num_drives_in_pool, minimum_rebuilds=hdd_minimum_rebuilds)
 
         if hdd_mgs_for_this_pool and not mgs_created:
             mgs_vd = VirtualDisk(
