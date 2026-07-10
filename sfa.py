@@ -68,6 +68,7 @@ class Pool:
     name: str
     tier: str
     disk_type: str = "NVMe"
+    minimum_rebuilds: int = 0
     virtual_disks: list[VirtualDisk] = field(default_factory=list)
 
 
@@ -500,7 +501,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
     ost_index = 0
 
     for i in range(num_pools):
-        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe")
+        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", minimum_rebuilds=0)
 
         if i == 0 and has_mgs and not mgs_created:
             mgs_vd = VirtualDisk(
@@ -560,128 +561,124 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
     if not hdd_drives:
         return []
 
-    capacity_gb = int(hdd_drives[0].capacity_tib * 1024)
+    hdd_capacity_gb = int(hdd_drives[0].capacity_tib * 1024)
     total_hdd_drives = len(hdd_drives)
-    print(f"Found {total_hdd_drives} HDD drive(s) at {format_capacity(capacity_gb)} each.\n")
-    print("Configure HDD pools (flexible layout)\n")
+    print(f"Found {total_hdd_drives} HDD drive(s) at {format_capacity(hdd_capacity_gb)} each.\n")
 
-    pools = []
-    pool_index = 0
-    needs_metadata = usage != "Data Only"
-    mgs_size_gb = 128 if has_mgs else 0
-    mgs_created = False
-    mdt_index = 0
-    ost_index = 0
-
-    print(f"\n{HEADER}Virtual Disk Settings:{RESET}")
+    print(f"{HEADER}Virtual Disk Settings:{RESET}")
     print(f"  Default: Chunk 256KB, RAID 6, 10 drives per VD, 1 VD per pool")
     print()
 
-    use_standard_hdd = inquirer.confirm(
+    use_standard_hdd_vd = inquirer.confirm(
         message="Use standard HDD VD settings?",
         default=True,
     ).execute()
 
-    if use_standard_hdd:
-        chunk_size_kb = 256
-        raid_level = "RAID 6"
-        drives_per_vd = 10
+    if use_standard_hdd_vd:
+        hdd_chunk_size_kb = 256
+        hdd_raid_level = "RAID 6"
+        hdd_drives_per_vd = 10
     else:
-        chunk_size_kb = int(inquirer.select(
+        hdd_chunk_size_kb = int(inquirer.select(
             message="Chunk size (KB):",
             choices=CHUNK_SIZES,
             default="256",
         ).execute())
 
-        raid_level = inquirer.select(
+        hdd_raid_level = inquirer.select(
             message="RAID level:",
             choices=RAID_LEVELS,
             default="RAID 6",
         ).execute()
 
-        drives_per_vd = int(inquirer.text(
+        hdd_drives_per_vd = int(inquirer.text(
             message="Drives per VD:",
             default="10",
             validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
         ).execute())
 
-    pools = []
-    mgs_created = False
-    pool_index = 0
-    mdt_index = 0
-    ost_index = 0
+    hdd_pools = []
+    hdd_mgs_created = False
+    hdd_pool_index = 0
+    hdd_mdt_index = 0
+    hdd_ost_index = 0
+    hdd_needs_metadata = usage != "Data Only"
+    hdd_mgs_size_gb = 128 if has_mgs else 0
 
     while True:
-        pool_index += 1
-        pool_name = inquirer.text(
-            message=f"HDD Pool {pool_index} name:",
-            default=f"hdd_pool_{pool_index}",
+        hdd_pool_index += 1
+        hdd_pool_name = inquirer.text(
+            message=f"HDD Pool {hdd_pool_index} name:",
+            default=f"hdd_pool_{hdd_pool_index}",
         ).execute()
 
         disk_type = inquirer.select(
-            message=f"Disk type for {pool_name}:",
+            message=f"Disk type for {hdd_pool_name}:",
             choices=["HDD", "SSD", "NVMe"],
             default="HDD",
         ).execute()
 
-        num_drives_in_pool = inquirer.text(
-            message=f"Number of drives in {pool_name}:",
-            default="12",
-            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+        pool_purpose = inquirer.select(
+            message=f"Pool purpose for {hdd_pool_name}:",
+            choices=["Metadata + Data", "Metadata Only", "Data Only"],
+            default="Metadata + Data",
         ).execute()
 
-        num_drives_in_pool = int(num_drives_in_pool)
+        hdd_num_drives_in_pool = int(inquirer.text(
+            message=f"Number of drives in {hdd_pool_name}:",
+            default="12",
+            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+        ).execute())
 
-        mgs_for_this_pool = mgs_size_gb if pool_index == 1 and not mgs_created else 0
-        layout = calculate_vd_layout(num_drives_in_pool, capacity_gb, drives_per_vd=drives_per_vd, needs_metadata=needs_metadata, mgs_size_gb=mgs_for_this_pool)
+        hdd_mgs_for_this_pool = hdd_mgs_size_gb if hdd_pool_index == 1 and not hdd_mgs_created else 0
+        hdd_layout = calculate_vd_layout(hdd_num_drives_in_pool, hdd_capacity_gb, drives_per_vd=hdd_drives_per_vd, needs_metadata=(pool_purpose != "Data Only"), mgs_size_gb=hdd_mgs_for_this_pool)
 
-        pool = Pool(name=pool_name.strip(), tier="HDD", disk_type=disk_type)
+        hdd_pool = Pool(name=hdd_pool_name.strip(), tier="HDD", disk_type=disk_type, minimum_rebuilds=1)
 
-        if mgs_for_this_pool and not mgs_created:
+        if hdd_mgs_for_this_pool and not hdd_mgs_created:
             mgs_vd = VirtualDisk(
                 name="mgs",
-                raid_level=raid_level,
+                raid_level=hdd_raid_level,
                 drive_count=2,
                 drive_size_gb=64,
-                chunk_size_kb=chunk_size_kb,
+                chunk_size_kb=hdd_chunk_size_kb,
                 purpose="Metadata",
                 hot_spare=False
             )
-            pool.virtual_disks.append(mgs_vd)
-            mgs_created = True
+            hdd_pool.virtual_disks.append(mgs_vd)
+            hdd_mgs_created = True
 
-        metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, layout['metadata_vds'])
-        data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, layout['data_vds'])
-
-        for j in range(layout['metadata_vds']):
-            metadata_drive_size_gb = metadata_per_vd_gb // drives_per_vd
+        if pool_purpose in ["Metadata + Data", "Metadata Only"]:
+            metadata_per_vd_gb = hdd_layout['total_metadata_capacity_gb'] // max(1, hdd_layout['metadata_vds'])
+            metadata_drive_size_gb = metadata_per_vd_gb // hdd_drives_per_vd
             vd = VirtualDisk(
-                name=f"{fs_name}_mdt{mdt_index:04d}_s0",
-                raid_level=raid_level,
-                drive_count=drives_per_vd,
+                name=f"{fs_name}_mdt{hdd_mdt_index:04d}_s0",
+                raid_level=hdd_raid_level,
+                drive_count=hdd_drives_per_vd,
                 drive_size_gb=metadata_drive_size_gb,
-                chunk_size_kb=chunk_size_kb,
+                chunk_size_kb=hdd_chunk_size_kb,
                 purpose="Metadata",
                 hot_spare=False
             )
-            pool.virtual_disks.append(vd)
-            mdt_index += 1
+            hdd_pool.virtual_disks.append(vd)
+            hdd_mdt_index += 1
 
-        for j in range(layout['data_vds']):
-            data_drive_size_gb = data_per_vd_gb // drives_per_vd
+        if pool_purpose in ["Metadata + Data", "Data Only"]:
+            data_per_vd_gb = hdd_layout['total_data_capacity_gb'] // max(1, hdd_layout['data_vds'])
+            data_drive_size_gb = data_per_vd_gb // hdd_drives_per_vd
             vd = VirtualDisk(
-                name=f"{fs_name}_ost{ost_index:04d}",
-                raid_level=raid_level,
-                drive_count=drives_per_vd,
+                name=f"{fs_name}_ost{hdd_ost_index:04d}",
+                raid_level=hdd_raid_level,
+                drive_count=hdd_drives_per_vd,
                 drive_size_gb=data_drive_size_gb,
-                chunk_size_kb=chunk_size_kb,
+                chunk_size_kb=hdd_chunk_size_kb,
                 purpose="Data",
                 hot_spare=False
             )
-            pool.virtual_disks.append(vd)
-            ost_index += 1
+            hdd_pool.virtual_disks.append(vd)
+            hdd_ost_index += 1
 
-        pools.append(pool)
+        hdd_pools.append(hdd_pool)
 
         add_another = inquirer.confirm(
             message="Add another HDD pool?",
@@ -691,7 +688,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
         if not add_another:
             break
 
-    return pools
+    return hdd_pools
 
 
 def step_review(config: StorageConfig) -> None:
