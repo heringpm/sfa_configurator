@@ -549,11 +549,9 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
     """Configure HDD pools (flexible configuration with sizing suggestions)."""
     section("Step 5b — Configure HDD Pools")
 
-    hdd_drives = [d for d in drives if d.drive_type == "HDD"]
+    hdd_drives = [d for d in drives if d.drive_type.lower() in ["hdd", "sas", "sata", "sat"]]
 
     if not hdd_drives:
-        drive_types = set(d.drive_type for d in drives)
-        print(f"{DIM}Debug: No HDD drives found. Drive types detected: {drive_types}{RESET}\n")
         return []
 
     capacity_gb = int(hdd_drives[0].capacity_tib * 1024)
