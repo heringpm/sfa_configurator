@@ -502,59 +502,57 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
         validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
     ).execute())
 
-    pools = []
+    pools = [Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", drive_count=drives_per_pool, minimum_rebuilds=nvme_minimum_rebuilds) for i in range(num_pools)]
+
+    metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, num_metadata_vds)
+    data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, num_data_vds)
+
+    mgs_created = False
     mdt_index = 0
     ost_index = 0
-    mgs_created = False
 
-    for i in range(num_pools):
-        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", drive_count=drives_per_pool, minimum_rebuilds=nvme_minimum_rebuilds)
+    if has_mgs and num_metadata_vds > 0:
+        mgs_vd = VirtualDisk(
+            name="mgs",
+            raid_level=raid_level,
+            drive_count=2,
+            drive_size_gb=64,
+            chunk_size_kb=chunk_size_kb,
+            purpose="Metadata",
+            hot_spare=False
+        )
+        pools[0].virtual_disks.append(mgs_vd)
+        mgs_created = True
 
-        if i == 0 and has_mgs and not mgs_created and num_metadata_vds > 0:
-            mgs_vd = VirtualDisk(
-                name="mgs",
-                raid_level=raid_level,
-                drive_count=2,
-                drive_size_gb=64,
-                chunk_size_kb=chunk_size_kb,
-                purpose="Metadata",
-                hot_spare=False
-            )
-            pool.virtual_disks.append(mgs_vd)
-            mgs_created = True
+    for vd_idx in range(num_metadata_vds):
+        pool_idx = vd_idx % num_pools
+        metadata_drive_size_gb = metadata_per_vd_gb // drives_per_vd
+        vd = VirtualDisk(
+            name=f"{fs_name}_mdt{mdt_index:04d}_s0",
+            raid_level=raid_level,
+            drive_count=drives_per_vd,
+            drive_size_gb=metadata_drive_size_gb,
+            chunk_size_kb=chunk_size_kb,
+            purpose="Metadata",
+            hot_spare=False
+        )
+        pools[pool_idx].virtual_disks.append(vd)
+        mdt_index += 1
 
-        metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, num_metadata_vds)
-        data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, num_data_vds)
-
-        for j in range(num_metadata_vds):
-            metadata_drive_size_gb = metadata_per_vd_gb // drives_per_vd
-            vd = VirtualDisk(
-                name=f"{fs_name}_mdt{mdt_index:04d}_s0",
-                raid_level=raid_level,
-                drive_count=drives_per_vd,
-                drive_size_gb=metadata_drive_size_gb,
-                chunk_size_kb=chunk_size_kb,
-                purpose="Metadata",
-                hot_spare=False
-            )
-            pool.virtual_disks.append(vd)
-            mdt_index += 1
-
-        for j in range(num_data_vds):
-            data_drive_size_gb = data_per_vd_gb // drives_per_vd
-            vd = VirtualDisk(
-                name=f"{fs_name}_ost{ost_index:04d}",
-                raid_level=raid_level,
-                drive_count=drives_per_vd,
-                drive_size_gb=data_drive_size_gb,
-                chunk_size_kb=chunk_size_kb,
-                purpose="Data",
-                hot_spare=False
-            )
-            pool.virtual_disks.append(vd)
-            ost_index += 1
-
-        pools.append(pool)
+    for vd_idx in range(num_data_vds):
+        pool_idx = vd_idx % num_pools
+        data_drive_size_gb = data_per_vd_gb // drives_per_vd
+        vd = VirtualDisk(
+            name=f"{fs_name}_ost{ost_index:04d}",
+            raid_level=raid_level,
+            drive_count=drives_per_vd,
+            drive_size_gb=data_drive_size_gb,
+            chunk_size_kb=chunk_size_kb,
+            purpose="Data",
+            hot_spare=False
+        )
+        pools[pool_idx].virtual_disks.append(vd)
+        ost_index += 1
 
     return pools
 
