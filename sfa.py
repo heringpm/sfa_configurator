@@ -483,7 +483,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
             num_metadata_vds = layout['metadata_vds']
 
         if num_metadata_vds > 0:
-            metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // 2 // num_metadata_vds
+            metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // num_metadata_vds
             metadata_drive_size_gb = metadata_per_vd_gb // drives_per_vd
 
             for j in range(num_metadata_vds):
@@ -499,7 +499,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool
                 pool.virtual_disks.append(vd)
 
         if num_data_vds > 0:
-            data_per_vd_gb = layout['total_data_capacity_gb'] // 2 // num_data_vds
+            data_per_vd_gb = layout['total_data_capacity_gb'] // num_data_vds
             data_drive_size_gb = data_per_vd_gb // drives_per_vd
 
             for j in range(num_data_vds):
@@ -610,11 +610,11 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool 
             vd_drives = int(vd_drives)
 
             if purpose == "Metadata":
-                metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // 2 // max(1, layout['metadata_vds'])
+                metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, layout['metadata_vds'])
                 drive_size = metadata_per_vd_gb // vd_drives
                 metadata_vd_count += 1
             else:
-                data_per_vd_gb = layout['total_data_capacity_gb'] // 2 // max(1, layout['data_vds'])
+                data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, layout['data_vds'])
                 drive_size = data_per_vd_gb // vd_drives
                 data_vd_count += 1
 
