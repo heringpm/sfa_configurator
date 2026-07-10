@@ -763,8 +763,10 @@ def generate_commands(config: StorageConfig) -> None:
     for pool_idx, pool in enumerate(config.pools):
         for vd in pool.virtual_disks:
             chunk_size_str = f"{vd.chunk_size_kb}k"
-            raid_str = vd.raid_level.upper()
-            cmd = f"ssh user@{config.appliance_name}-c0 CREATE VIRTUAL_DISK POOL {pool_idx} NAME {vd.name} CAPACITY {vd.vd_capacity_gb} INDEX {vd_global_index} CHUNK_SIZE {chunk_size_str} MEMBER_COUNT {vd.drive_count} RAID_LEVEL {raid_str} SGC {vd.sgc}"
+            raid_str = vd.raid_level.lower().replace(" ", "")
+
+            member_count_flag = "" if raid_str == "raid6" else f" MEMBER_COUNT {vd.drive_count}"
+            cmd = f"ssh user@{config.appliance_name}-c0 CREATE VIRTUAL_DISK POOL {pool_idx} NAME {vd.name} CAPACITY {vd.vd_capacity_gb} INDEX {vd_global_index} CHUNK_SIZE {chunk_size_str}{member_count_flag} RAID_LEVEL {raid_str} SGC {vd.sgc}"
             print(cmd)
             vd_global_index += 1
     print()
