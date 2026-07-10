@@ -68,6 +68,7 @@ class Pool:
     name: str
     tier: str
     disk_type: str = "NVMe"
+    drive_count: int = 0
     minimum_rebuilds: int = 0
     virtual_disks: list[VirtualDisk] = field(default_factory=list)
 
@@ -501,7 +502,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
     mgs_created = False
 
     for i in range(num_pools):
-        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", minimum_rebuilds=0)
+        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", drive_count=drives_per_pool, minimum_rebuilds=0)
 
         if i == 0 and has_mgs and not mgs_created and num_metadata_vds > 0:
             mgs_vd = VirtualDisk(
@@ -632,7 +633,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
         hdd_mgs_for_this_pool = hdd_mgs_size_gb if has_metadata_in_pool and not mgs_created else 0
         hdd_layout = calculate_vd_layout(hdd_num_drives_in_pool, hdd_capacity_gb, drives_per_vd=hdd_drives_per_vd, needs_metadata=has_metadata_in_pool, mgs_size_gb=hdd_mgs_for_this_pool)
 
-        hdd_pool = Pool(name=hdd_pool_name.strip(), tier="HDD", disk_type=disk_type, minimum_rebuilds=1)
+        hdd_pool = Pool(name=hdd_pool_name.strip(), tier="HDD", disk_type=disk_type, drive_count=hdd_num_drives_in_pool, minimum_rebuilds=1)
 
         if hdd_mgs_for_this_pool and not mgs_created:
             mgs_vd = VirtualDisk(
