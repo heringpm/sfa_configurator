@@ -70,6 +70,7 @@ class Pool:
     disk_type: str = "NVMe"
     drive_count: int = 0
     minimum_rebuilds: int = 0
+    slots: str = ""
     virtual_disks: list[VirtualDisk] = field(default_factory=list)
 
 
@@ -502,7 +503,26 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
         validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
     ).execute())
 
-    pools = [Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", drive_count=drives_per_pool, minimum_rebuilds=nvme_minimum_rebuilds) for i in range(num_pools)]
+    pools = []
+    for i in range(num_pools):
+        start_slot = (i * drives_per_pool) + 1
+        end_slot = start_slot + drives_per_pool - 1
+        default_slots = f"{start_slot}-{end_slot}"
+
+        slots = inquirer.text(
+            message=f"NVMe pool {i+1} slots:",
+            default=default_slots,
+        ).execute()
+
+        pool = Pool(
+            name=f"nvme_pool_{i+1}",
+            tier="NVMe",
+            disk_type="NVMe",
+            drive_count=drives_per_pool,
+            minimum_rebuilds=nvme_minimum_rebuilds,
+            slots=slots.strip()
+        )
+        pools.append(pool)
 
     metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, num_metadata_vds)
     data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, num_data_vds)
@@ -710,6 +730,22 @@ def step_review(config: StorageConfig) -> None:
     print()
 
 
+def generate_commands(config: StorageConfig) -> None:
+    """Generate EMF commands to create pools and VDs."""
+    section("Step 7 — Generated Commands")
+
+    print(f"{HEADER}Pool Creation Commands:{RESET}")
+    for pool in config.pools:
+        print(f"emf command to create pool {pool.name}")
+    print()
+
+    print(f"{HEADER}Virtual Disk Creation Commands:{RESET}")
+    for pool in config.pools:
+        for vd in pool.virtual_disks:
+            print(f"emf command to create vd {vd.name} on pool {pool.name}")
+    print()
+
+
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
@@ -751,6 +787,8 @@ def run_wizard(defaults=None) -> StorageConfig:
         print("\nNo drives detected. Skipping pool configuration.\n")
 
     step_review(config)
+
+    generate_commands(config)
 
     confirmed = inquirer.confirm(
         message="Confirm and submit this configuration?",
