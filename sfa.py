@@ -730,16 +730,33 @@ def step_review(config: StorageConfig) -> None:
     print()
 
 
+def expand_slots(slot_range: str) -> str:
+    """Expand slot range (e.g., '1-12') to comma-separated list (e.g., '1,2,3,...,12')."""
+    slots = []
+    for part in slot_range.split(','):
+        part = part.strip()
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            slots.extend(range(start, end + 1))
+        else:
+            slots.append(int(part))
+    return ','.join(map(str, sorted(set(slots))))
+
+
 def generate_commands(config: StorageConfig) -> None:
     """Generate EMF commands to create pools and VDs."""
     section("Step 7 — Generated Commands")
 
-    print(f"{HEADER}Pool Creation Commands:{RESET}")
-    for pool in config.pools:
-        print(f"emf command to create pool {pool.name}")
-    print()
+    print(f"{HEADER}Pool Creation Commands:{RESET}\n")
 
-    print(f"{HEADER}Virtual Disk Creation Commands:{RESET}")
+    nvme_pools = [p for p in config.pools if p.tier == "NVMe"]
+    for idx, pool in enumerate(nvme_pools):
+        expanded_slots = expand_slots(pool.slots)
+        cmd = f"emf sfa pool create --name {pool.name} --index {idx} --member-count {pool.drive_count} --minimum-rebuilds {pool.minimum_rebuilds} --assign-slots {expanded_slots} --ips $(ping {config.appliance_name}-c0 -c1 | grep PING | awk '{{print $3}}' | tr -d '()') --sfa-api-password user"
+        print(cmd)
+        print()
+
+    print(f"{HEADER}Virtual Disk Creation Commands:{RESET}\n")
     for pool in config.pools:
         for vd in pool.virtual_disks:
             print(f"emf command to create vd {vd.name} on pool {pool.name}")
