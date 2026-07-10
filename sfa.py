@@ -752,7 +752,7 @@ def generate_commands(config: StorageConfig) -> None:
     nvme_pools = [p for p in config.pools if p.tier == "NVMe"]
     for idx, pool in enumerate(nvme_pools):
         expanded_slots = expand_slots(pool.slots)
-        cmd = f"{EMF} sfa pool create --name {pool.name} --index {idx} --member-count {pool.drive_count} --minimum-rebuilds {pool.minimum_rebuilds} --assign-slots {expanded_slots} --ips $(ping {config.appliance_name}-c0 -c1 | grep PING | awk '{{print $3}}' | tr -d '()') --sfa-api-password {SFA_API_PASSWORD}"
+        cmd = f"{EMF} sfa pool create --name {pool.name} --index {idx} --member-count {pool.drive_count} --minimum-rebuilds {pool.minimum_rebuilds} --assign-slots {expanded_slots} --ip $(ping {config.appliance_name}-c0 -c1 | grep PING | awk '{{print $3}}' | tr -d '()') --sfa-api-password {SFA_API_PASSWORD}"
         print(cmd)
         print()
 
