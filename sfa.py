@@ -57,6 +57,10 @@ class VirtualDisk:
     chunk_size_kb: int
     purpose: str
     hot_spare: bool
+    vd_capacity_gb: int = field(init=False)
+
+    def __post_init__(self):
+        self.vd_capacity_gb = self.drive_count * self.drive_size_gb
 
 
 @dataclass
