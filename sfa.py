@@ -448,13 +448,19 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
             print(f"  Metadata capacity:  {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
         print()
 
+        chunk_size_kb = int(inquirer.select(
+            message="Chunk size (KB):",
+            choices=CHUNK_SIZES,
+            default="128",
+        ).execute())
+
         if i == 0 and has_mgs and not mgs_created:
             mgs_vd = VirtualDisk(
                 name="mgs",
                 raid_level="RAID 6",
                 drive_count=2,
                 drive_size_gb=64,
-                chunk_size_kb=128,
+                chunk_size_kb=chunk_size_kb,
                 purpose="Metadata",
                 hot_spare=False
             )
@@ -494,7 +500,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
                     raid_level="RAID 6",
                     drive_count=drives_per_vd,
                     drive_size_gb=metadata_drive_size_gb,
-                    chunk_size_kb=128,
+                    chunk_size_kb=chunk_size_kb,
                     purpose="Metadata",
                     hot_spare=False
                 )
@@ -511,7 +517,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
                     raid_level="RAID 6",
                     drive_count=drives_per_vd,
                     drive_size_gb=data_drive_size_gb,
-                    chunk_size_kb=128,
+                    chunk_size_kb=chunk_size_kb,
                     purpose="Data",
                     hot_spare=False
                 )
@@ -570,6 +576,12 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
             print(f"  Metadata capacity:  {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
         print()
 
+        chunk_size_kb = int(inquirer.select(
+            message="Chunk size (KB):",
+            choices=CHUNK_SIZES,
+            default="128",
+        ).execute())
+
         num_vds = inquirer.text(
             message=f"Number of VDs for {pool_name}:",
             default=str(layout['data_vds'] + layout['metadata_vds'] + (1 if mgs_for_this_pool else 0)),
@@ -584,7 +596,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
                 raid_level="RAID 6",
                 drive_count=2,
                 drive_size_gb=64,
-                chunk_size_kb=128,
+                chunk_size_kb=chunk_size_kb,
                 purpose="Metadata",
                 hot_spare=False
             )
@@ -628,7 +640,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
                 raid_level=raid_level,
                 drive_count=vd_drives,
                 drive_size_gb=drive_size,
-                chunk_size_kb=128,
+                chunk_size_kb=chunk_size_kb,
                 purpose=purpose,
                 hot_spare=False
             )
