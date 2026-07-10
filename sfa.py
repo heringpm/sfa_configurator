@@ -496,14 +496,14 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
         ).execute())
 
     pools = []
-    mgs_created = False
     mdt_index = 0
     ost_index = 0
+    mgs_created = False
 
     for i in range(num_pools):
         pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe", minimum_rebuilds=0)
 
-        if i == 0 and has_mgs and not mgs_created:
+        if i == 0 and has_mgs and not mgs_created and num_metadata_vds > 0:
             mgs_vd = VirtualDisk(
                 name="mgs",
                 raid_level=raid_level,
@@ -598,11 +598,9 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
         ).execute())
 
     hdd_pools = []
-    hdd_mgs_created = False
     hdd_pool_index = 0
     hdd_mdt_index = 0
     hdd_ost_index = 0
-    hdd_needs_metadata = usage != "Data Only"
     hdd_mgs_size_gb = 128 if has_mgs else 0
 
     while True:
@@ -630,12 +628,13 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
             validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
         ).execute())
 
-        hdd_mgs_for_this_pool = hdd_mgs_size_gb if hdd_pool_index == 1 and not hdd_mgs_created else 0
-        hdd_layout = calculate_vd_layout(hdd_num_drives_in_pool, hdd_capacity_gb, drives_per_vd=hdd_drives_per_vd, needs_metadata=(pool_purpose != "Data Only"), mgs_size_gb=hdd_mgs_for_this_pool)
+        has_metadata_in_pool = pool_purpose in ["Metadata + Data", "Metadata Only"]
+        hdd_mgs_for_this_pool = hdd_mgs_size_gb if has_metadata_in_pool and not mgs_created else 0
+        hdd_layout = calculate_vd_layout(hdd_num_drives_in_pool, hdd_capacity_gb, drives_per_vd=hdd_drives_per_vd, needs_metadata=has_metadata_in_pool, mgs_size_gb=hdd_mgs_for_this_pool)
 
         hdd_pool = Pool(name=hdd_pool_name.strip(), tier="HDD", disk_type=disk_type, minimum_rebuilds=1)
 
-        if hdd_mgs_for_this_pool and not hdd_mgs_created:
+        if hdd_mgs_for_this_pool and not mgs_created:
             mgs_vd = VirtualDisk(
                 name="mgs",
                 raid_level=hdd_raid_level,
@@ -646,7 +645,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
                 hot_spare=False
             )
             hdd_pool.virtual_disks.append(mgs_vd)
-            hdd_mgs_created = True
+            mgs_created = True
 
         if pool_purpose in ["Metadata + Data", "Metadata Only"]:
             metadata_per_vd_gb = hdd_layout['total_metadata_capacity_gb'] // max(1, hdd_layout['metadata_vds'])
