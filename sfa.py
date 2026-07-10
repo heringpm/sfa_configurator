@@ -758,9 +758,15 @@ def generate_commands(config: StorageConfig) -> None:
         print()
 
     print(f"{HEADER}Virtual Disk Creation Commands:{RESET}\n")
-    for pool in config.pools:
+
+    vd_global_index = 0
+    for pool_idx, pool in enumerate(config.pools):
         for vd in pool.virtual_disks:
-            print(f"emf command to create vd {vd.name} on pool {pool.name}")
+            chunk_size_str = f"{vd.chunk_size_kb}k"
+            raid_str = vd.raid_level.upper()
+            cmd = f"ssh user@{config.appliance_name}-c0 CREATE VIRTUAL_DISK POOL {pool_idx} NAME {vd.name} CAPACITY {vd.vd_capacity_gb} INDEX {vd_global_index} CHUNK_SIZE {chunk_size_str} MEMBER_COUNT {vd.drive_count} RAID_LEVEL {raid_str} SGC {vd.sgc}"
+            print(cmd)
+            vd_global_index += 1
     print()
 
 
