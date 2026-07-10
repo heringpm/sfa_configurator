@@ -224,10 +224,11 @@ def calculate_vd_layout(
     total_drives: int,
     drive_size_gb: int,
     drives_per_vd: int = 10,
-    needs_metadata: bool = True
+    needs_metadata: bool = True,
+    mgs_size_gb: int = 0
 ) -> dict[str, Any]:
-    """Calculate optimal VD layout with metadata/data split."""
-    total_capacity_gb = total_drives * drive_size_gb
+    """Calculate optimal VD layout with metadata/data split (1% metadata rule)."""
+    total_capacity_gb = total_drives * drive_size_gb - mgs_size_gb
 
     if not needs_metadata:
         num_data_vds = max(1, total_drives // drives_per_vd)
@@ -241,21 +242,18 @@ def calculate_vd_layout(
         }
 
     metadata_capacity_gb = max(100, int(total_capacity_gb * 0.01))
-    num_metadata_vds = max(1, (metadata_capacity_gb + (drive_size_gb * drives_per_vd - 1)) // (drive_size_gb * drives_per_vd))
-    drives_for_metadata = num_metadata_vds * drives_per_vd
-    drives_for_data = total_drives - drives_for_metadata
+    data_capacity_gb = total_capacity_gb - metadata_capacity_gb
 
-    num_data_vds = max(1, drives_for_data // drives_per_vd)
+    num_metadata_vds = max(1, (metadata_capacity_gb + (drive_size_gb * drives_per_vd - 1)) // (drive_size_gb * drives_per_vd))
+    num_data_vds = max(1, (data_capacity_gb + (drive_size_gb * drives_per_vd - 1)) // (drive_size_gb * drives_per_vd))
 
     return {
         "data_vds": num_data_vds,
         "data_vd_size_gb": drive_size_gb,
         "metadata_vds": num_metadata_vds,
         "metadata_vd_size_gb": drive_size_gb,
-        "total_data_capacity_gb": drives_for_data * drive_size_gb,
-        "total_metadata_capacity_gb": drives_for_metadata * drive_size_gb,
-        "drives_for_data": drives_for_data,
-        "drives_for_metadata": drives_for_metadata,
+        "total_data_capacity_gb": data_capacity_gb,
+        "total_metadata_capacity_gb": metadata_capacity_gb,
     }
 
 # ── Wizard steps ───────────────────────────────────────────────────────────────
@@ -395,7 +393,7 @@ def step_ask_mgs() -> bool:
     return mgs_needed
 
 
-def step_configure_nvme_pools(drives: list[DriveInfo], usage: str) -> list[Pool]:
+def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, has_mgs: bool = False) -> list[Pool]:
     """Configure NVMe pools with automatic metadata/data sizing."""
     section("Step 5a — Configure NVMe Pools")
 
@@ -425,17 +423,37 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str) -> list[Pool]
 
     needs_metadata = usage != "Data Only"
     drives_per_vd = 10
+    mgs_size_gb = 128 if has_mgs else 0
 
     pools = []
+    mgs_created = False
+
     for i in range(num_pools):
         pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe")
 
-        layout = calculate_vd_layout(drives_per_pool, capacity_gb, drives_per_vd, needs_metadata)
+        layout = calculate_vd_layout(drives_per_pool, capacity_gb, drives_per_vd, needs_metadata, mgs_size_gb if i == 0 else 0)
 
-        print(f"\n{HEADER}Pool {i+1} Sizing:{RESET}")
-        print(f"  Data VDs: {layout['data_vds']} × {drives_per_vd} drives = {format_capacity(layout['total_data_capacity_gb'])}")
+        print(f"\n{HEADER}Pool {i+1} Capacity Allocation:{RESET}")
+        print(f"  Total pool capacity: {format_capacity(drives_per_pool * capacity_gb)}")
+        if i == 0 and has_mgs:
+            print(f"  MGS VD:             {format_capacity(mgs_size_gb)}")
+        print(f"  Data capacity:      {format_capacity(layout['total_data_capacity_gb'])}")
         if needs_metadata:
-            print(f"  Metadata VDs: {layout['metadata_vds']} × {drives_per_vd} drives = {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
+            print(f"  Metadata capacity:  {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
+        print()
+
+        if i == 0 and has_mgs and not mgs_created:
+            mgs_vd = VirtualDisk(
+                name="mgs",
+                raid_level="RAID 6",
+                drive_count=2,
+                drive_size_gb=128,
+                chunk_size_kb=128,
+                purpose="Metadata",
+                hot_spare=False
+            )
+            pool.virtual_disks.append(mgs_vd)
+            mgs_created = True
 
         tweak = inquirer.confirm(
             message=f"Tweak pool {i+1} VD configuration?",
@@ -489,7 +507,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str) -> list[Pool]
     return pools
 
 
-def step_configure_hdd_pools(drives: list[DriveInfo], usage: str) -> list[Pool]:
+def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, has_mgs: bool = False) -> list[Pool]:
     """Configure HDD pools (flexible configuration with sizing suggestions)."""
     section("Step 5b — Configure HDD Pools")
 
@@ -505,6 +523,8 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str) -> list[Pool]:
     pools = []
     pool_index = 0
     needs_metadata = usage != "Data Only"
+    mgs_size_gb = 128 if has_mgs else 0
+    mgs_created = False
 
     while True:
         pool_index += 1
@@ -520,22 +540,40 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str) -> list[Pool]:
         ).execute()
 
         num_drives_in_pool = int(num_drives_in_pool)
-        layout = calculate_vd_layout(num_drives_in_pool, capacity_gb, drives_per_vd=12, needs_metadata=needs_metadata)
+        mgs_for_this_pool = mgs_size_gb if pool_index == 1 and not mgs_created else 0
+        layout = calculate_vd_layout(num_drives_in_pool, capacity_gb, drives_per_vd=12, needs_metadata=needs_metadata, mgs_size_gb=mgs_for_this_pool)
 
-        print(f"\n{HEADER}Suggested sizing for {pool_name}:{RESET}")
-        print(f"  Data VDs: {layout['data_vds']} × 12 drives = {format_capacity(layout['total_data_capacity_gb'])}")
+        print(f"\n{HEADER}Capacity Allocation for {pool_name}:{RESET}")
+        print(f"  Total pool capacity: {format_capacity(num_drives_in_pool * capacity_gb)}")
+        if mgs_for_this_pool:
+            print(f"  MGS VD:             {format_capacity(mgs_for_this_pool)}")
+        print(f"  Data capacity:      {format_capacity(layout['total_data_capacity_gb'])}")
         if needs_metadata:
-            print(f"  Metadata VDs: {layout['metadata_vds']} × 12 drives = {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
+            print(f"  Metadata capacity:  {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
+        print()
 
         num_vds = inquirer.text(
             message=f"Number of VDs for {pool_name}:",
-            default=str(layout['data_vds'] + layout['metadata_vds']),
+            default=str(layout['data_vds'] + layout['metadata_vds'] + (1 if mgs_for_this_pool else 0)),
             validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
         ).execute()
 
         pool = Pool(name=pool_name.strip(), tier="HDD")
 
-        for vd_idx in range(int(num_vds)):
+        if mgs_for_this_pool and not mgs_created:
+            mgs_vd = VirtualDisk(
+                name="mgs",
+                raid_level="RAID 6",
+                drive_count=2,
+                drive_size_gb=128,
+                chunk_size_kb=128,
+                purpose="Metadata",
+                hot_spare=False
+            )
+            pool.virtual_disks.append(mgs_vd)
+            mgs_created = True
+
+        for vd_idx in range(int(num_vds) - (1 if mgs_for_this_pool and mgs_created else 0)):
             vd_drives = inquirer.text(
                 message=f"  VD {vd_idx+1}: drives per VD:",
                 default="12",
@@ -619,10 +657,10 @@ def run_wizard(defaults=None) -> StorageConfig:
     )
 
     if not keep_existing and drives:
-        nvme_pools = step_configure_nvme_pools(drives, usage)
+        nvme_pools = step_configure_nvme_pools(drives, usage, has_mgs)
         config.pools.extend(nvme_pools)
 
-        hdd_pools = step_configure_hdd_pools(drives, usage)
+        hdd_pools = step_configure_hdd_pools(drives, usage, has_mgs)
         config.pools.extend(hdd_pools)
 
         if not nvme_pools and not hdd_pools:
