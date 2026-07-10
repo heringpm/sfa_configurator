@@ -67,6 +67,7 @@ class VirtualDisk:
 class Pool:
     name: str
     tier: str
+    disk_type: str = "NVMe"
     virtual_disks: list[VirtualDisk] = field(default_factory=list)
 
 
@@ -426,7 +427,6 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
     drives_per_pool = int(drives_per_pool)
 
     needs_metadata = usage != "Data Only"
-    drives_per_vd = 10
     mgs_size_gb = 128 if has_mgs else 0
 
     pools = []
@@ -435,7 +435,19 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
     ost_index = 0
 
     for i in range(num_pools):
-        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe")
+        pool = Pool(name=f"nvme_pool_{i+1}", tier="NVMe", disk_type="NVMe")
+
+        raid_level = inquirer.select(
+            message=f"Pool {i+1} RAID level:",
+            choices=RAID_LEVELS,
+            default="RAID 6",
+        ).execute()
+
+        drives_per_vd = int(inquirer.text(
+            message=f"Pool {i+1} drives per VD:",
+            default="10",
+            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+        ).execute())
 
         layout = calculate_vd_layout(drives_per_pool, capacity_gb, drives_per_vd, needs_metadata, mgs_size_gb if i == 0 else 0)
 
@@ -457,7 +469,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
         if i == 0 and has_mgs and not mgs_created:
             mgs_vd = VirtualDisk(
                 name="mgs",
-                raid_level="RAID 6",
+                raid_level=raid_level,
                 drive_count=2,
                 drive_size_gb=64,
                 chunk_size_kb=chunk_size_kb,
@@ -497,7 +509,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
             for j in range(num_metadata_vds):
                 vd = VirtualDisk(
                     name=f"{fs_name}_mdt{mdt_index:04d}_s0",
-                    raid_level="RAID 6",
+                    raid_level=raid_level,
                     drive_count=drives_per_vd,
                     drive_size_gb=metadata_drive_size_gb,
                     chunk_size_kb=chunk_size_kb,
@@ -514,7 +526,7 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
             for j in range(num_data_vds):
                 vd = VirtualDisk(
                     name=f"{fs_name}_ost{ost_index:04d}",
-                    raid_level="RAID 6",
+                    raid_level=raid_level,
                     drive_count=drives_per_vd,
                     drive_size_gb=data_drive_size_gb,
                     chunk_size_kb=chunk_size_kb,
@@ -557,6 +569,12 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
             default=f"hdd_pool_{pool_index}",
         ).execute()
 
+        disk_type = inquirer.select(
+            message=f"Disk type for {pool_name}:",
+            choices=["HDD", "SSD", "NVMe"],
+            default="HDD",
+        ).execute()
+
         num_drives_in_pool = inquirer.text(
             message=f"Number of drives in {pool_name}:",
             default="12",
@@ -564,8 +582,21 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
         ).execute()
 
         num_drives_in_pool = int(num_drives_in_pool)
+
+        raid_level = inquirer.select(
+            message=f"{pool_name} RAID level:",
+            choices=RAID_LEVELS,
+            default="RAID 6",
+        ).execute()
+
+        drives_per_vd = int(inquirer.text(
+            message=f"{pool_name} drives per VD:",
+            default="12",
+            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+        ).execute())
+
         mgs_for_this_pool = mgs_size_gb if pool_index == 1 and not mgs_created else 0
-        layout = calculate_vd_layout(num_drives_in_pool, capacity_gb, drives_per_vd=12, needs_metadata=needs_metadata, mgs_size_gb=mgs_for_this_pool)
+        layout = calculate_vd_layout(num_drives_in_pool, capacity_gb, drives_per_vd=drives_per_vd, needs_metadata=needs_metadata, mgs_size_gb=mgs_for_this_pool)
 
         print(f"\n{HEADER}Capacity Allocation for {pool_name}:{RESET}")
         print(f"  Total pool capacity: {format_capacity(num_drives_in_pool * capacity_gb)}")
@@ -588,12 +619,12 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
             validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
         ).execute()
 
-        pool = Pool(name=pool_name.strip(), tier="HDD")
+        pool = Pool(name=pool_name.strip(), tier="HDD", disk_type=disk_type)
 
         if mgs_for_this_pool and not mgs_created:
             mgs_vd = VirtualDisk(
                 name="mgs",
-                raid_level="RAID 6",
+                raid_level=raid_level,
                 drive_count=2,
                 drive_size_gb=64,
                 chunk_size_kb=chunk_size_kb,
@@ -610,10 +641,10 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
                 validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
             ).execute()
 
-            raid_level = inquirer.select(
+            vd_raid_level = inquirer.select(
                 message=f"  VD {vd_idx+1}: RAID level:",
                 choices=RAID_LEVELS,
-                default="RAID 6",
+                default=raid_level,
             ).execute()
 
             purpose = inquirer.select(
@@ -637,7 +668,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
 
             vd = VirtualDisk(
                 name=vd_name,
-                raid_level=raid_level,
+                raid_level=vd_raid_level,
                 drive_count=vd_drives,
                 drive_size_gb=drive_size,
                 chunk_size_kb=chunk_size_kb,
