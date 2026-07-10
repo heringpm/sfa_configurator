@@ -73,7 +73,6 @@ class StorageConfig:
     usage: str
     has_mgs: bool
     pools: list[Pool] = field(default_factory=list)
-    drive_info: list[DriveInfo] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -616,8 +615,7 @@ def run_wizard(defaults=None) -> StorageConfig:
         appliance_name=appliance_name,
         fs_name=fs_name,
         usage=usage,
-        has_mgs=has_mgs,
-        drive_info=drives
+        has_mgs=has_mgs
     )
 
     if not keep_existing and drives:
