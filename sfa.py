@@ -23,7 +23,7 @@ from InquirerPy.validator import NumberValidator
 # ── Variables ────────────────────────────────────────────────────────────────
 
 EMF = "/work/repo/bmlab/lustre/emf-2026062516-cli-x86_64-unknown-linux-gnu-el8/emf"
-SFA_API_PASSWORD = "your_password_here"
+SFA_API_PASSWORD = "user"
 
 # ── Data model ────────────────────────────────────────────────────────────────
 
