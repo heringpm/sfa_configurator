@@ -237,7 +237,10 @@ def calculate_vd_layout(
     mgs_size_gb: int = 0
 ) -> dict[str, Any]:
     """Calculate optimal VD layout with metadata/data split (1% metadata rule)."""
-    total_capacity_gb = total_drives * drive_size_gb - mgs_size_gb
+    # Account for RAID 6 overhead: usable capacity = (drives_per_vd - 2) / drives_per_vd
+    raid6_usable_fraction = (drives_per_vd - 2) / drives_per_vd
+    total_raw_capacity_gb = total_drives * drive_size_gb
+    total_capacity_gb = int(total_raw_capacity_gb * raid6_usable_fraction) - mgs_size_gb
 
     if not needs_metadata:
         num_data_vds = max(1, total_drives // drives_per_vd)
