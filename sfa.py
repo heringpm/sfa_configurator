@@ -458,7 +458,16 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
         print(f"  Data capacity:      {format_capacity(layout['total_data_capacity_gb'])}")
         if needs_metadata:
             print(f"  Metadata capacity:  {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
+
+        print(f"\n{HEADER}Standard Layout:{RESET}")
+        print(f"  Metadata VDs: {layout['metadata_vds']}")
+        print(f"  Data VDs: {layout['data_vds']}")
         print()
+
+        use_standard = inquirer.confirm(
+            message=f"Use standard layout for pool {i+1}?",
+            default=True,
+        ).execute()
 
         chunk_size_kb = int(inquirer.select(
             message="Chunk size (KB):",
@@ -479,12 +488,10 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
             pool.virtual_disks.append(mgs_vd)
             mgs_created = True
 
-        tweak = inquirer.confirm(
-            message=f"Tweak pool {i+1} VD configuration?",
-            default=False,
-        ).execute()
-
-        if tweak:
+        if use_standard:
+            num_data_vds = layout['data_vds']
+            num_metadata_vds = layout['metadata_vds']
+        else:
             num_data_vds = int(inquirer.text(
                 message="  Number of data VDs:",
                 default=str(layout['data_vds']),
@@ -498,9 +505,6 @@ def step_configure_nvme_pools(drives: list[DriveInfo], usage: str, fs_name: str,
                     default=str(layout['metadata_vds']),
                     validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
                 ).execute())
-        else:
-            num_data_vds = layout['data_vds']
-            num_metadata_vds = layout['metadata_vds']
 
         if num_metadata_vds > 0:
             metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // num_metadata_vds
@@ -605,7 +609,16 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
         print(f"  Data capacity:      {format_capacity(layout['total_data_capacity_gb'])}")
         if needs_metadata:
             print(f"  Metadata capacity:  {format_capacity(layout['total_metadata_capacity_gb'])} (1% rule)")
+
+        print(f"\n{HEADER}Standard Layout:{RESET}")
+        print(f"  Metadata VDs: {layout['metadata_vds']}")
+        print(f"  Data VDs: {layout['data_vds']}")
         print()
+
+        use_standard = inquirer.confirm(
+            message=f"Use standard layout for {pool_name}?",
+            default=True,
+        ).execute()
 
         chunk_size_kb = int(inquirer.select(
             message="Chunk size (KB):",
@@ -613,11 +626,16 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
             default="128",
         ).execute())
 
-        num_vds = inquirer.text(
-            message=f"Number of VDs for {pool_name}:",
-            default=str(layout['data_vds'] + layout['metadata_vds'] + (1 if mgs_for_this_pool else 0)),
-            validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
-        ).execute()
+        if use_standard:
+            num_vds = layout['data_vds'] + layout['metadata_vds'] + (1 if mgs_for_this_pool else 0)
+            auto_vds = True
+        else:
+            num_vds = int(inquirer.text(
+                message=f"Number of VDs for {pool_name}:",
+                default=str(layout['data_vds'] + layout['metadata_vds'] + (1 if mgs_for_this_pool else 0)),
+                validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+            ).execute())
+            auto_vds = False
 
         pool = Pool(name=pool_name.strip(), tier="HDD", disk_type=disk_type)
 
@@ -634,37 +652,53 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
             pool.virtual_disks.append(mgs_vd)
             mgs_created = True
 
+        vd_count = 0
         for vd_idx in range(int(num_vds) - (1 if mgs_for_this_pool and mgs_created else 0)):
-            vd_drives = inquirer.text(
-                message=f"  VD {vd_idx+1}: drives per VD:",
-                default="12",
-                validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
-            ).execute()
-
-            vd_raid_level = inquirer.select(
-                message=f"  VD {vd_idx+1}: RAID level:",
-                choices=RAID_LEVELS,
-                default=raid_level,
-            ).execute()
-
-            purpose = inquirer.select(
-                message=f"  VD {vd_idx+1}: Purpose:",
-                choices=VD_PURPOSES,
-                default="Data",
-            ).execute()
-
-            vd_drives = int(vd_drives)
-
-            if purpose == "Metadata":
-                metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, layout['metadata_vds'])
-                drive_size = metadata_per_vd_gb // vd_drives
-                vd_name = f"{fs_name}_mdt{mdt_index:04d}_s0"
-                mdt_index += 1
+            if auto_vds:
+                if vd_count < layout['metadata_vds']:
+                    purpose = "Metadata"
+                    vd_count_local = vd_count
+                    metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, layout['metadata_vds'])
+                    drive_size = metadata_per_vd_gb // drives_per_vd
+                    vd_name = f"{fs_name}_mdt{mdt_index:04d}_s0"
+                    mdt_index += 1
+                else:
+                    purpose = "Data"
+                    data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, layout['data_vds'])
+                    drive_size = data_per_vd_gb // drives_per_vd
+                    vd_name = f"{fs_name}_ost{ost_index:04d}"
+                    ost_index += 1
+                vd_drives = drives_per_vd
+                vd_raid_level = raid_level
             else:
-                data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, layout['data_vds'])
-                drive_size = data_per_vd_gb // vd_drives
-                vd_name = f"{fs_name}_ost{ost_index:04d}"
-                ost_index += 1
+                vd_drives = int(inquirer.text(
+                    message=f"  VD {vd_idx+1}: drives per VD:",
+                    default="12",
+                    validate=NumberValidator(float_allowed=False, message="Enter a whole number."),
+                ).execute())
+
+                vd_raid_level = inquirer.select(
+                    message=f"  VD {vd_idx+1}: RAID level:",
+                    choices=RAID_LEVELS,
+                    default=raid_level,
+                ).execute()
+
+                purpose = inquirer.select(
+                    message=f"  VD {vd_idx+1}: Purpose:",
+                    choices=VD_PURPOSES,
+                    default="Data",
+                ).execute()
+
+                if purpose == "Metadata":
+                    metadata_per_vd_gb = layout['total_metadata_capacity_gb'] // max(1, layout['metadata_vds'])
+                    drive_size = metadata_per_vd_gb // vd_drives
+                    vd_name = f"{fs_name}_mdt{mdt_index:04d}_s0"
+                    mdt_index += 1
+                else:
+                    data_per_vd_gb = layout['total_data_capacity_gb'] // max(1, layout['data_vds'])
+                    drive_size = data_per_vd_gb // vd_drives
+                    vd_name = f"{fs_name}_ost{ost_index:04d}"
+                    ost_index += 1
 
             vd = VirtualDisk(
                 name=vd_name,
@@ -676,6 +710,7 @@ def step_configure_hdd_pools(drives: list[DriveInfo], usage: str, fs_name: str, 
                 hot_spare=False
             )
             pool.virtual_disks.append(vd)
+            vd_count += 1
 
         pools.append(pool)
 
